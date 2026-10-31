@@ -1,21 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../utils/supabase";
 
-
-interface Knowledge {
-    id: number | null;
-    title: string;
-    categoryId: number;
-    tagIds: number[];
-    body: string;
-    basis: string | null;
-    userId: string | null;
-    //expirationDate : 
+interface Tag {
+    id: number;
+    name: string;
 }
 
 interface KnowledgeModalProps {
     modalRef: React.RefObject<HTMLDialogElement | null>;
     onModalClose: () => void;
+    tags: Tag[];
+    onTagAdded: (tag: Tag) => void;
     addKnowledge: (
         title: string,
         categoryId: number,
@@ -54,50 +49,111 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
     const [categoryError, setCategoryError] = useState("");
 
     const [tagQuery, setTagQuery] = useState("");
-    const [tags, setTags] = useState<Tag[]>([]);
     const [newTag, setNewTag] = useState("");
     const [tagError, setTagError] = useState("");
 
     const [titleError, setTitleError] = useState("");
     const [bodyError, setBodyError] = useState("");
 
+    const [selectedCategoryError, setSelectedCategoryError] = useState("");
+    const [selectedTagError, setSelectedTagError] = useState("");
+    const [submitError, setSubmitError] = useState("");
+
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
     const handleClose = () => {
         props.onModalClose();
+
         setForm(initData);
+
+        setTitleError("");
+        setSelectedCategoryError("");
+        setSelectedTagError("");
+        setBodyError("");
+        setSubmitError("");
+
+        setCategoryError("");
+        setTagError("");
+
+        setTagQuery("");
+        setNewCategory("");
+        setNewTag("");
+
+        addCategoryModal.current?.close();
+        addTagModal.current?.close();
     };
 
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    const handleSubmit = async (
+        e: React.FormEvent<HTMLFormElement>
+    ) => {
         e.preventDefault();
+
+        if (isSubmitting) return;
+
+        setTitleError("");
+        setSelectedCategoryError("");
+        setSelectedTagError("");
+        setBodyError("");
+        setSubmitError("");
 
         const { title, category, tag, body, basis } = form;
 
+        let hasError = false;
+
         if (title.trim() === "") {
             setTitleError("タイトルを入力してください");
-            return;
+            hasError = true;
         }
 
         if (category === null) {
-            setCategoryError("カテゴリを選択してください");
-            return;
+            setSelectedCategoryError("カテゴリを選択してください");
+            hasError = true;
+        }
+
+        if (tag.length === 0) {
+            setSelectedTagError("タグを1つ以上選択してください");
+            hasError = true;
         }
 
         if (body.trim() === "") {
             setBodyError("内容を入力してください");
-            return;
+            hasError = true;
         }
 
-        const success = await props.addKnowledge(
-            title,
-            category,
-            tag,
-            body,
-            basis,
-        );
+        if (hasError) return;
 
-        if (success) {
+        setIsSubmitting(true);
+
+        try {
+
+            if (category === null) {
+                return;
+            }
+
+            const success = await props.addKnowledge(
+                title.trim(),
+                category,
+                tag,
+                body.trim(),
+                basis.trim() || null
+            );
+
+            if (!success) {
+                setSubmitError(
+                    "登録に失敗しました。入力内容や通信状態を確認してください。"
+                );
+                return;
+            }
+
             handleClose();
+        } catch (error) {
+            console.error("ナレッジ登録エラー:", error);
+            setSubmitError(
+                "予期しないエラーが発生しました。もう一度お試しください。"
+            );
+        } finally {
+            setIsSubmitting(false);
         }
-
     };
 
     useEffect(() => {
@@ -116,24 +172,6 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
         };
 
         fetchCategories();
-    }, []);
-
-    useEffect(() => {
-        const fetchTags = async () => {
-            const { data, error } = await supabase
-                .from("tags")
-                .select("id, name")
-                .order("id", { ascending: true });
-
-            if (error) {
-                console.error("タグ取得エラー:", error);
-                return;
-            }
-
-            setTags(data ?? []);
-        };
-
-        fetchTags();
     }, []);
 
     const onAddCategoryModalOpen = () => {
@@ -159,12 +197,13 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                             <input
                                 type="text"
                                 value={form.title}
-                                onChange={(e) => 
+                                onChange={(e) => {
                                     setForm((prev) => ({
                                         ...prev,
                                         title: e.target.value,
-                                    }))
-                                }
+                                    }));
+                                    setTitleError("");
+                                }}
                                 className="input flex w-full border-gray-300 bg-white text-gray-800 placeholder:text-gray-400"
                                 placeholder="タイトルを入力" />
                             {titleError && (
@@ -181,14 +220,15 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                             <div className="flex gap-2 w-full">
                                 <select
                                     value={form.category ?? ""}
-                                    onChange={(e) =>
+                                    onChange={(e) => {
                                         setForm((prev) => ({
                                             ...prev,
                                             category: e.target.value === ""
                                                 ? null
                                                 : Number(e.target.value),
-                                        }))
-                                    }
+                                        }));
+                                        setSelectedCategoryError("");
+                                    }}
                                     className={`select border-gray-300 bg-white
                                          ${form.category === null ? "text-gray-400" : "text-gray-800"}`}
                                 >
@@ -212,6 +252,11 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                     <span className="text-sm">新規カテゴリ</span>
                                 </button>
                             </div>
+                            {selectedCategoryError && (
+                                <p className="text-sm text-red-500">
+                                    {selectedCategoryError}
+                                </p>
+                            )}
                             <h3 className="font-semibold text-gray-800">
                                 タグ
                                 <span className="ml-1 text-sm text-red-500">
@@ -223,7 +268,7 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                     value={tagQuery}
                                     onChange={(e) => setTagQuery(e.target.value)}
                                     className="input border-gray-300 bg-white text-gray-800 placeholder:text-gray-400"
-                                    placeholder="タグを検索・入力"/>
+                                    placeholder="タグを検索・入力" />
                                 <button
                                     type="button"
                                     onClick={() => onAddTagModalOpen()}
@@ -234,9 +279,14 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                     <span className="text-sm">新規タグ</span>
                                 </button>
                             </div>
-                            <div className="mt-2 flex flex-wrap gap-2">
+                            {selectedTagError && (
+                                <p className="text-sm text-red-500">
+                                    {selectedTagError}
+                                </p>
+                            )}
+                            <div className="flex flex-wrap gap-2">
                                 {form.tag.map((tagId) => {
-                                    const tag = tags.find((item) => item.id === tagId);
+                                    const tag = props.tags.find((item) => item.id === tagId);
 
                                     if (!tag) return null;
 
@@ -254,15 +304,12 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                             {tag.name}
                                         </button>
                                     )
-                                }
-
-
-                                )}
+                                })}
                             </div>
                             {tagQuery.trim() !== "" && (
-                                <div className="mt-1 flex flex-wrap gap-2">
-                                    {tags.filter((tag) =>
-                                        tag.name.includes(tagQuery) && !form.tag.includes(tag.id)
+                                <div className="flex flex-wrap gap-2">
+                                    {props.tags.filter((tag) =>
+                                        tag.name.toLowerCase().includes(tagQuery.trim().toLowerCase()) && !form.tag.includes(tag.id)
                                     ).map((tag) =>
                                         <button
                                             key={tag.id}
@@ -272,6 +319,7 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                                     ...prev,
                                                     tag: [...prev.tag, tag.id],
                                                 }));
+                                                setSelectedTagError("");
                                                 setTagQuery("");
                                             }}
                                             className="btn btn-sm border-gray-300 bg-white text-gray-800"
@@ -291,12 +339,13 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                 placeholder="詳細"
                                 rows={1}
                                 value={form.body}
-                                onChange={(e) =>
+                                onChange={(e) => {
                                     setForm((prev) => ({
                                         ...prev,
                                         body: e.target.value,
-                                    }))
-                                } />
+                                    }));
+                                    setBodyError("");
+                                }} />
                             {bodyError && (
                                 <p className="text-sm text-red-500">
                                     {bodyError}
@@ -336,6 +385,11 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                     登録
                                 </button>
                             </div>
+                            {submitError && (
+                                <p role="alert" className="text-sm text-red-500">
+                                    {submitError}
+                                </p>
+                            )}
                         </div>
                     </form>
                 </div>
@@ -457,7 +511,7 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                         return;
                                     }
 
-                                    if (tags.some((item) => item.name === name)) {
+                                    if (props.tags.some((item) => item.name === name)) {
                                         setTagError("このタグはすでに登録されています");
                                         return;
                                     }
@@ -474,7 +528,8 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                         return;
                                     }
 
-                                    setTags((prev) => [...prev, data]);
+                                    props.onTagAdded(data);
+                                    
                                     setForm((prev) => ({
                                         ...prev,
                                         tag: [...prev.tag, data.id],
