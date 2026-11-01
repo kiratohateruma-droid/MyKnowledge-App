@@ -1,25 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../utils/supabase";
 
-interface Tag {
-    id: number;
-    name: string;
-}
-
-interface KnowledgeModalProps {
-    modalRef: React.RefObject<HTMLDialogElement | null>;
-    onModalClose: () => void;
-    tags: Tag[];
-    onTagAdded: (tag: Tag) => void;
-    addKnowledge: (
-        title: string,
-        categoryId: number,
-        tagIds: number[],
-        body: string,
-        basis: string | null
-    ) => Promise<boolean>;
-}
-
 interface Category {
     id: number;
     name: string;
@@ -28,6 +9,40 @@ interface Category {
 interface Tag {
     id: number;
     name: string;
+}
+
+interface EditingKnowledge {
+    id: number;
+    title: string;
+    categoryId: number;
+    tagIds: number[];
+    body: string;
+    basis: string | null;
+}
+
+interface KnowledgeModalProps {
+    modalRef: React.RefObject<HTMLDialogElement | null>;
+    onModalClose: () => void;
+    tags: Tag[];
+    onTagAdded: (tag: Tag) => void;
+    categories: Category[];
+    onCategoryAdded: (category: Category) => void;
+    addKnowledge: (
+        title: string,
+        categoryId: number,
+        tagIds: number[],
+        body: string,
+        basis: string | null
+    ) => Promise<boolean>;
+    editingKnowledge: EditingKnowledge | null;
+    updateKnowledge: (
+        knowledgeId: number,
+        title: string,
+        categoryId: number,
+        tagIds: number[],
+        body: string,
+        basis: string | null
+    ) => Promise<boolean>;
 }
 
 const KnowledgeModal = (props: KnowledgeModalProps) => {
@@ -44,7 +59,6 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
 
     const [form, setForm] = useState(initData);
 
-    const [categories, setCategories] = useState<Category[]>([]);
     const [newCategory, setNewCategory] = useState("");
     const [categoryError, setCategoryError] = useState("");
 
@@ -60,6 +74,29 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
     const [submitError, setSubmitError] = useState("");
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (props.editingKnowledge) {
+            const knowledge = props.editingKnowledge;
+
+            setForm({
+                title: knowledge.title,
+                category: knowledge.categoryId,
+                tag: [...knowledge.tagIds],
+                body: knowledge.body,
+                basis: knowledge.basis ?? "",
+            });
+        }
+        else {
+            setForm({
+                title: "",
+                category: null,
+                tag: [],
+                body: "",
+                basis: "",
+            });
+        }
+    }, [props.editingKnowledge]);
 
     const handleClose = () => {
         props.onModalClose();
@@ -130,13 +167,22 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                 return;
             }
 
-            const success = await props.addKnowledge(
-                title.trim(),
-                category,
-                tag,
-                body.trim(),
-                basis.trim() || null
-            );
+            const success = props.editingKnowledge
+                ? await props.updateKnowledge(
+                    props.editingKnowledge.id,
+                    title.trim(),
+                    category,
+                    tag,
+                    body.trim(),
+                    basis.trim() || null
+                )
+                : await props.addKnowledge(
+                    title.trim(),
+                    category,
+                    tag,
+                    body.trim(),
+                    basis.trim() || null
+                );
 
             if (!success) {
                 setSubmitError(
@@ -155,24 +201,6 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
             setIsSubmitting(false);
         }
     };
-
-    useEffect(() => {
-        const fetchCategories = async () => {
-            const { data, error } = await supabase
-                .from("categories")
-                .select("id, name")
-                .order("id", { ascending: true });
-
-            if (error) {
-                console.error("カテゴリ取得エラー:", error);
-                return;
-            }
-
-            setCategories(data ?? []);
-        };
-
-        fetchCategories();
-    }, []);
 
     const onAddCategoryModalOpen = () => {
         addCategoryModal.current?.showModal();
@@ -236,7 +264,7 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                         カテゴリを選択
                                     </option>
 
-                                    {categories.map((item) => (
+                                    {props.categories.map((item) => (
                                         <option key={item.id} value={item.id}>
                                             {item.name}
                                         </option>
@@ -366,12 +394,6 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                         basis: e.target.value,
                                     }))
                                 } />
-                            <button
-                                type="button"
-                                onClick={handleClose}
-                                className="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">
-                                ✕
-                            </button>
                             <div className="mt-4 flex justify-end gap-2">
                                 <button
                                     type="button"
@@ -382,7 +404,7 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                 <button
                                     type="submit"
                                     className="btn border-0 bg-teal-700 text-white">
-                                    登録
+                                    {props.editingKnowledge ? "更新" : "登録"}
                                 </button>
                             </div>
                             {submitError && (
@@ -436,7 +458,7 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                         return;
                                     }
 
-                                    if (categories.some((item) => item.name === name)) {
+                                    if (props.categories.some((item) => item.name === name)) {
                                         setCategoryError("このカテゴリはすでに登録されています");
                                         return;
                                     }
@@ -453,7 +475,8 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                         return;
                                     }
 
-                                    setCategories((prev) => [...prev, data]);
+                                    props.onCategoryAdded(data);
+
                                     setForm((prev) => ({
                                         ...prev,
                                         category: data.id,
@@ -480,7 +503,7 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                         value={newTag}
                                         onChange={(e) => setNewTag(e.target.value)}
                                         onFocus={() => setTagError("")}
-                                        placeholder="カテゴリ名を入力"
+                                        placeholder="タグ名を入力"
                                         className="placeholder:text-gray-400"
                                     />
                                 </label>
@@ -529,7 +552,7 @@ const KnowledgeModal = (props: KnowledgeModalProps) => {
                                     }
 
                                     props.onTagAdded(data);
-                                    
+
                                     setForm((prev) => ({
                                         ...prev,
                                         tag: [...prev.tag, data.id],

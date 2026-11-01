@@ -1,6 +1,8 @@
 import KnowledgeModal from "./KnowledgeModal";
 import SearchInput from "./SearchInput";
 import SelectTags from "./SelectTags";
+import SelectCategory from "./SelectCategory";
+import KnowledgeCard from "./KnowledgeCard";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../utils/supabase";
 
@@ -10,7 +12,6 @@ interface Knowledge {
     categoryId: number;
     categoryName: string;
     tagIds: number[];
-    tagNames: string[];
     body: string;
     basis: string | null;
 }
@@ -20,26 +21,42 @@ interface Tag {
     name: string;
 }
 
+interface Category {
+    id: number;
+    name: string;
+}
+
 const Body = () => {
     const addKnowledgeModal = useRef<HTMLDialogElement>(null);
     const [knowledges, setKnowledges] = useState<Knowledge[]>([]);
+    const [tags, setTags] = useState<Tag[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
     const [error, setError] = useState("");
 
     const [searchInputQuery, setSearchInputQuery] = useState("");
     const [searchInputTagQuery, setSearchInputTagQuery] = useState("");
-    const [tags, setTags] = useState<Tag[]>([]);
 
     const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+    const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+
+    const [editingKnowledge, setEditingKnowledge] = useState<Knowledge | null>(null);
+    const [deletingId, setDeletingId] = useState<number | null>(null);
 
     const onModalOpen = () => {
+        setEditingKnowledge(null);
         addKnowledgeModal.current?.showModal();
     };
 
+    const onEditModalOpen = (knowledge: Knowledge) => {
+        setEditingKnowledge(knowledge);
+        addKnowledgeModal.current?.showModal();
+    }
+
     const onModalClose = () => {
         addKnowledgeModal.current?.close();
+        setEditingKnowledge(null);
     };
 
-    // Supabaseから知識一覧を取得
     const fetchKnowledges = async () => {
 
         const { data: categoryData, error: categoryError } = await supabase
@@ -58,6 +75,8 @@ const Body = () => {
             return;
         }
 
+        setCategories(categoryData ?? [])
+
         const categoryMap = new Map(
             categoryData.map((category) => [category.id, category.name])
         );
@@ -71,10 +90,7 @@ const Body = () => {
                 body,
                 basis,
                 knowledge_tags (
-                    tag_id,
-                    tags (
-                        name
-                    )
+                    tag_id
                 )
             `)
             .order("created_at", { ascending: false });
@@ -94,12 +110,11 @@ const Body = () => {
             categoryId: item.category_id,
             categoryName: categoryMap.get(item.category_id),
             tagIds: item.knowledge_tags.map((item) => item.tag_id),
-            tagNames: item.knowledge_tags
-                .map((tagItem) => tagItem.tags?.[0]?.name)
-                .filter((name): name is string => Boolean(name)),
             body: item.body,
             basis: item.basis,
         }));
+
+        console.log("Supabaseから取得したタグ情報：", data[0]?.knowledge_tags);
 
         console.log(
             "取得したカテゴリ名：",
@@ -110,12 +125,10 @@ const Body = () => {
         setError("");
     };
 
-    // 画面表示時に一覧を取得
     useEffect(() => {
         fetchKnowledges();
     }, []);
 
-    // 知識を登録
     const addKnowledge = async (
         title: string,
         categoryId: number,
@@ -124,7 +137,6 @@ const Body = () => {
         basis: string | null,
     ): Promise<boolean> => {
 
-        // 知識本体を登録
         const { data, error: insertError } = await supabase
             .from("knowledge_items")
             .insert({
@@ -159,7 +171,6 @@ const Body = () => {
             }
         }
 
-        // 登録後に一覧を再取得
         await fetchKnowledges();
         return true;
     };
@@ -182,7 +193,6 @@ const Body = () => {
         fetchTags();
     }, []);
 
-    //知識の検索
     const searchKnowledges = knowledges.filter((knowledge) => {
         const query = searchInputQuery.trim().toLowerCase();
 
@@ -191,17 +201,118 @@ const Body = () => {
             knowledge.body.toLowerCase().includes(query);
 
         const matchesTags =
-            selectedTagIds.length == 0 ||
+            selectedTagIds.length === 0 ||
             selectedTagIds.some((tagId) =>
                 knowledge.tagIds.includes(tagId)
             );
 
-            return matchesQuery && matchesTags;
+        const matchesCategory =
+            selectedCategoryId === null ||
+            knowledge.categoryId === selectedCategoryId;
+
+        return matchesQuery && matchesTags && matchesCategory;
     });
+
+    const updateKnowledge = async (
+        knowledgeId: number,
+        title: string,
+        categoryId: number,
+        tagIds: number[],
+        body: string,
+        basis: string | null,
+    ): Promise<boolean> => {
+        const { error: updateError } = await supabase
+            .from("knowledge_items")
+            .update({
+                title,
+                category_id: categoryId,
+                body,
+                basis,
+            })
+            .eq("id", knowledgeId);
+
+        if (updateError) {
+            console.error("ナレッジ更新エラー:", updateError);
+            return false;
+        }
+
+        const { error: removeTagError } = await supabase
+            .from("knowledge_tags")
+            .delete()
+            .eq("knowledge_id", knowledgeId);
+
+        if (removeTagError) {
+            console.error("タグ削除エラー:", removeTagError);
+            return false;
+        }
+
+        if (tagIds.length > 0) {
+            const tagData = tagIds.map((tagId) => ({
+                knowledge_id: knowledgeId,
+                tag_id: tagId,
+            }));
+
+            const { error: addTagError } = await supabase
+                .from("knowledge_tags")
+                .insert(tagData);
+
+            if (addTagError) {
+                console.error("タグ登録エラー:", addTagError);
+                return false;
+            }
+        }
+
+        await fetchKnowledges();
+
+        return true;
+    }
+
+    const deleteKnowledge = async (knowledgeId: number) => {
+        const confirmed = window.confirm(
+            "このナレッジを削除しますか？"
+        );
+
+        if (!confirmed) return;
+
+        setDeletingId(knowledgeId);
+
+        try {
+            const { error: deleteTagError } = await supabase
+                .from("knowledge_tags")
+                .delete()
+                .eq("knowledge_id", knowledgeId);
+
+            if (deleteTagError) {
+                console.error("タグ情報の削除エラー:", deleteTagError);
+                return;
+            }
+
+            const { error: deleteError } = await supabase
+                .from("knowledge_items")
+                .delete()
+                .eq("id", knowledgeId);
+
+            if (deleteError) {
+                console.error("ナレッジの削除エラー:", deleteError);
+                return;
+            }
+
+            await fetchKnowledges();
+        } catch (error) {
+            console.error("削除エラー:", error);
+        } finally {
+            setDeletingId(null);
+        }
+    };
 
     return (
         <main className="mx-auto max-w-5xl p-8">
             <div className="flex items-center justify-between">
+                {error && (
+                    <p className="text-sm text-red-500" role="alert">
+                        {error}
+                    </p>
+                )}
                 <h2 className="text-2xl font-bold text-gray-800">
                     知識一覧
                 </h2>
@@ -220,19 +331,22 @@ const Body = () => {
                 addKnowledge={addKnowledge}
                 tags={tags}
                 onTagAdded={(tag) => {
-                    setTags((prev) => [...prev, tag])
+                    setTags((prev) => [...prev, tag]);
                 }}
+                categories={categories}
+                onCategoryAdded={(category) => {
+                    setCategories((prev) => [...prev, category]);
+                }}
+                editingKnowledge={editingKnowledge}
+                updateKnowledge={updateKnowledge}
             />
             <div className="mt-8 flex items-center gap-3">
-                {/* 検索欄 */}
-                {/* カテゴリ選択 */}
-                {/* タグ選択 */}
                 <SearchInput
                     inputQuery={searchInputQuery}
                     onInputQueryChange={setSearchInputQuery}
                 />
             </div>
-            <div className="mt-2">
+            <div className="mt-2 flex gap-2">
                 <SelectTags
                     inputQuery={searchInputTagQuery}
                     onInputQueryChange={setSearchInputTagQuery}
@@ -240,46 +354,20 @@ const Body = () => {
                     selectedTagIds={selectedTagIds}
                     onSelectedTagIdsChange={setSelectedTagIds}
                 />
+                <SelectCategory
+                    categories={categories}
+                    selectedCategoryId={selectedCategoryId}
+                    onSelectedCategoryIdChange={setSelectedCategoryId} />
             </div>
             <div className="mt-8 grid gap-4">
                 {searchKnowledges.map((knowledge) => (
-                    <article
+                    <KnowledgeCard
                         key={knowledge.id}
-                        className="rounded-lg border border-gray-300 bg-white p-4"
-                    >
-                        <h3 className="text-lg font-semibold text-gray-800">
-                            {knowledge.title}
-                        </h3>
-
-                        <p className="mt-2 text-sm text-gray-500">
-                            カテゴリ：{knowledge.categoryName}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                            {knowledge.tagNames.map((tagName) => (
-                                <span
-                                    key={tagName}
-                                    className="rounded-full bg-teal-100 px-3 py-1 text-sm text-teal-800"
-                                >
-                                    {tagName}
-                                </span>
-                            ))}
-                        </div>
-
-                        <p className="mt-2 whitespace-pre-wrap text-gray-700">
-                            {knowledge.body}
-                        </p>
-
-                        {knowledge.basis && (
-                            <a
-                                href={knowledge.basis}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="mt-2 block text-blue-600 underline"
-                            >
-                                参考：{knowledge.basis}
-                            </a>
-                        )}
-                    </article>
+                        knowledge={knowledge}
+                        tags={tags}
+                        onEdit={onEditModalOpen}
+                        onDelete={deleteKnowledge}
+                        isDeleting={deletingId === knowledge.id} />
                 ))}
             </div>
         </main>

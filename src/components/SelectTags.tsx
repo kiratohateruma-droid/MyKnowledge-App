@@ -42,29 +42,35 @@ const SelectTags = (props: SelectTagsProps) => {
                 className="input border-gray-300 bg-white text-gray-800 placeholder:text-gray-400"
                 placeholder="タグを検索・入力"
             />
-            {props.inputQuery.trim() !== "" && (
-                <div className="mt-1 flex flex-wrap gap-2">
-                    {props.tags.filter((tag) =>
-                        props.selectedTagIds.includes(tag.id)
-                    ).map((tag) => (
-                        <button
-                            key={tag.id}
-                            type="button"
-                            onClick={() => {handleRemoveTag(tag.id)}}
-                            className="btn btn-sm border-teal-700 bg-teal-100 text-gray-800">
-                            {tag.name}
-                        </button>
-                    ))}
-                    {filteredTags.map((tag) =>
-                        <button
-                            key={tag.id}
-                            type="button"
-                            onClick={() => handleSelectTag(tag.id)}
-                            className="btn btn-sm border-gray-300 bg-white text-gray-800"
-                        >{tag.name}</button>
-                    )}
-                </div>
-            )}
+            <div className="flex gap-2">
+                {props.selectedTagIds.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-2">
+                        {props.tags.filter((tag) =>
+                            props.selectedTagIds.includes(tag.id)
+                        ).map((tag) => (
+                            <button
+                                key={tag.id}
+                                type="button"
+                                onClick={() => { handleRemoveTag(tag.id) }}
+                                className="btn btn-sm border-teal-700 bg-teal-100 text-gray-800">
+                                {tag.name}
+                            </button>
+                        ))}
+                    </div>
+                )}
+                {props.inputQuery.trim() !== "" && (
+                    <div className="mt-1 flex flex-wrap gap-2">
+                        {filteredTags.map((tag) =>
+                            <button
+                                key={tag.id}
+                                type="button"
+                                onClick={() => handleSelectTag(tag.id)}
+                                className="btn btn-sm border-gray-300 bg-white text-gray-800"
+                            >{tag.name}</button>
+                        )}
+                    </div>
+                )}
+            </div>
         </div>
     );
 };
